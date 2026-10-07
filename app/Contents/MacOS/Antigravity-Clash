@@ -1,0 +1,11 @@
+#!/bin/zsh
+# Dock 入口: 转交随应用打包的脚本, 失败时用弹窗暴露原因
+out=$("${0:A:h}/../Resources/antigravity-clash" 2>&1)
+rc=$?
+if [ $rc -ne 0 ]; then
+  [[ -n "$out" ]] || out="启动失败 (退出码 $rc)"
+  osascript -e 'on run argv' \
+    -e 'display dialog (item 1 of argv) buttons {"OK"} default button 1 with icon caution' \
+    -e 'end run' -- "$out" >/dev/null 2>&1
+fi
+exit $rc

@@ -1,0 +1,93 @@
+#!/bin/zsh
+# Launch Antigravity with Clash mixed-port only. Do not set launchctl globally
+# (that would leak HTTP_PROXY into Docker/OrbStack/Claude Code).
+APP=/Applications/Antigravity.app
+PROXY=http://127.0.0.1:7897
+SOCKS_PROXY=socks5h://127.0.0.1:7897
+MAIN_PROCESS="^${APP//./[.]}/Contents/MacOS/Antigravity([[:space:]]|$)"
+NO_PROXY_LIST=localhost,127.0.0.1,::1
+NO_PROXY_FILE="$HOME/.config/antigravity-clash/no-proxy"
+if [[ -r "$NO_PROXY_FILE" ]]; then
+  extra_no_proxy=$(head -n 1 "$NO_PROXY_FILE" | tr -d '[:space:]')
+  [[ -z "$extra_no_proxy" ]] || NO_PROXY_LIST="$NO_PROXY_LIST,$extra_no_proxy"
+fi
+
+# Keep the check and launch together when the Dock icon is clicked repeatedly.
+if [[ "${1:-}" != --locked ]]; then
+  exec /usr/bin/lockf -k -t 15 "$HOME/Library/Caches/antigravity-clash.lock" /bin/zsh "$0" --locked
+fi
+
+find_main() {
+  pgrep -f "$MAIN_PROCESS"
+  local rc=$?
+  if (( rc > 1 )); then
+    echo "错误: 无法检查 Antigravity 进程" >&2
+    return 1
+  fi
+  return 0
+}
+
+has_proxy_env() {
+  local process_env expected
+  process_env=$(ps eww -p "$1" 2>/dev/null) || return 1
+  for expected in "HTTP_PROXY=$PROXY" "HTTPS_PROXY=$PROXY" "ALL_PROXY=$SOCKS_PROXY"; do
+    print -r -- "$process_env" | tr ' ' '\n' | grep -Fxq "$expected" || return 1
+  done
+}
+
+if ! nc -z -w1 127.0.0.1 7897 2>/dev/null; then
+  echo "错误: Clash 未监听 127.0.0.1:7897，先启动 Clash Verge" >&2
+  exit 1
+fi
+
+main_pids=$(find_main) || exit 1
+if [[ -n "$main_pids" ]]; then
+  for pid in ${(f)main_pids}; do
+    if ! has_proxy_env "$pid"; then
+      echo "错误: Antigravity 正在运行但未带预期代理 (pid $pid)，请 Cmd+Q 完全退出后重试" >&2
+      exit 1
+    fi
+  done
+  open -a "$APP"
+  rc=$?
+  if (( rc != 0 )); then
+    echo "错误: 无法打开已运行的 Antigravity" >&2
+    exit $rc
+  fi
+  echo "Antigravity 已在 Clash 代理下运行"
+  exit 0
+fi
+
+open -na "$APP" \
+  --env HTTP_PROXY=$PROXY \
+  --env HTTPS_PROXY=$PROXY \
+  --env ALL_PROXY=$SOCKS_PROXY \
+  --env http_proxy=$PROXY \
+  --env https_proxy=$PROXY \
+  --env all_proxy=$SOCKS_PROXY \
+  --env "NO_PROXY=$NO_PROXY_LIST" \
+  --env "no_proxy=$NO_PROXY_LIST"
+rc=$?
+if (( rc != 0 )); then
+  echo "错误: 无法启动 Antigravity" >&2
+  exit $rc
+fi
+
+# LaunchServices can report success before the application actually starts.
+for attempt in {1..20}; do
+  main_pids=$(find_main) || exit 1
+  if [[ -n "$main_pids" ]]; then
+    for pid in ${(f)main_pids}; do
+      if ! has_proxy_env "$pid"; then
+        echo "错误: Antigravity 已启动，但未带预期代理 (pid $pid)" >&2
+        exit 1
+      fi
+    done
+    echo "Antigravity 已在 Clash 代理下启动"
+    exit 0
+  fi
+  sleep 0.5
+done
+
+echo "错误: 启动命令已执行，但 10 秒内未发现 Antigravity 主进程" >&2
+exit 1
