@@ -23,7 +23,7 @@ open "$HOME/Applications/Antigravity-Clash.app"
 
 ## 直接点击原版 Antigravity 图标
 
-**实验功能：**已在 Antigravity 2.19.1 验证 Shell 环境注入和进程隔离；从原版图标冷启动后的登录与 AI 请求尚未完成端到端验证。
+**实验功能：**已在 Antigravity 2.19.1 验证实际冷启动、Shell 环境注入、进程隔离及后台到 Clash 的连接；登录与 AI 回复尚未独立完成端到端验证。
 
 macOS 的默认 Shell 为 zsh 时，可以启用：
 
@@ -52,6 +52,23 @@ antigravity-clash --status
 ```
 
 启用、禁用后需要重启 Antigravity，已有进程会保留原来的环境。安装前需移除或重新生成已编译的 `.zlogin.zwc` 文件。
+
+## 原版直接启动的原理
+
+Antigravity 2.19.1 在创建后台服务前，会通过 `shellEnvSync()` 读取登录 Shell 的环境。受管理的 `.zlogin` 配置检查 Shell 的直接父进程是否为 `/Applications/Antigravity.app/Contents/MacOS/Antigravity`。匹配时，调用 `antigravity-clash --shell-env` 导出 HTTP、HTTPS、SOCKS 代理及直连地址配置，反重力再把读取到的环境传给后台服务。
+
+```mermaid
+flowchart TD
+    A[点击原版反重力图标] --> B[读取登录 Shell 环境]
+    B --> C[登录配置验证父进程身份]
+    C --> D[导出代理环境变量]
+    D --> E[使用读取到的环境创建后台服务]
+    E --> F[后台连接 Clash 的 7897 端口]
+```
+
+此方式为后台服务设置环境，不修改主进程环境、原版应用文件或 macOS 系统代理。后台服务的子进程也可能继承这些变量，网络客户端需支持读取代理变量，最终路线仍由 Clash 规则决定。
+
+2026-10-07，用户重启后实际检查确认：新的主进程没有三个代理变量，后台服务具备全部三个变量，并已建立到 `127.0.0.1:7897` 的连接；macOS 的 HTTP、HTTPS、SOCKS 和 PAC 代理均关闭。这些现象确认原版直接启动配置已生效，但不能据此认定所有请求都走代理，也不能等同于登录和 AI 回复已完成端到端测试。
 
 ## 直连域名
 

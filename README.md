@@ -23,7 +23,7 @@ The launcher checks the Clash port and the Antigravity process tree. It accepts 
 
 ## Launch from the original Antigravity icon
 
-**Experimental:** shell environment injection and process isolation have been verified on Antigravity 2.19.1. Login and AI requests after a cold launch from the original icon have not yet been verified end to end.
+**Experimental:** a cold launch, shell environment injection, process isolation, and the backend connection to Clash have been verified on Antigravity 2.19.1. Login and AI responses have not yet been independently verified end to end.
 
 For macOS users whose default shell is zsh:
 
@@ -52,6 +52,23 @@ To disable this mode while retaining the launcher:
 ```
 
 Restart Antigravity after enabling or disabling this mode. Existing processes keep their environment until they exit. Compiled `.zlogin.zwc` files must be removed or rebuilt before installation.
+
+## How direct launch works
+
+Antigravity 2.19.1 reads its login shell environment with `shellEnvSync()` before spawning its language server. The managed `.zlogin` hook checks the shell's immediate parent against `/Applications/Antigravity.app/Contents/MacOS/Antigravity`. When it matches, the hook calls `antigravity-clash --shell-env` to export the HTTP, HTTPS, SOCKS, and bypass settings. Antigravity passes the captured environment to the language server.
+
+```mermaid
+flowchart TD
+    A[Original Antigravity icon] --> B[Read login shell environment]
+    B --> C[Login hook verifies parent process]
+    C --> D[Export proxy environment]
+    D --> E[Spawn language server with captured environment]
+    E --> F[Backend connects to Clash on port 7897]
+```
+
+This sets the backend's environment without changing the main process's environment, the original application files, or the macOS system proxy. Descendants of the backend can inherit these variables. Network clients must honor the variables, and Clash rules still decide the route.
+
+After a user-performed restart on 2026-10-07, the new main process had none of the three proxy variables, its language server had all three, and the backend had an established connection to `127.0.0.1:7897`. The macOS HTTP, HTTPS, SOCKS, and PAC proxy settings were disabled. These observations confirm that the direct-launch configuration took effect; they do not establish that every request uses the proxy or that login and AI responses have passed end-to-end testing.
 
 ## Direct connections
 
