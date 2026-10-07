@@ -1,42 +1,44 @@
 # Antigravity-Clash
 
-在不启用 macOS 系统代理或 TUN 模式的情况下，为 Antigravity 单独设置 Clash Verge 代理。
+English | [简体中文](README.zh-CN.md)
 
-## 前提
+Launch Antigravity through Clash Verge without enabling the macOS system proxy or TUN mode.
 
-- macOS 13 或更新版本。
-- Antigravity 安装在 `/Applications/Antigravity.app`。
-- Clash Verge 正在运行，mixed port 为 `127.0.0.1:7897`。
+## Requirements
 
-## 安装与使用
+- macOS 13 or later.
+- Antigravity installed at `/Applications/Antigravity.app`.
+- Clash Verge running with its mixed port at `127.0.0.1:7897`.
+
+## Install and use
 
 ```sh
 ./install.sh
 open "$HOME/Applications/Antigravity-Clash.app"
 ```
 
-安装脚本将应用放在 `~/Applications`，并将命令行入口放在 `~/.local/bin/antigravity-clash`。也可以直接从终端运行 `bin/antigravity-clash`。
+The installer puts the app in `~/Applications` and the command-line launcher at `~/.local/bin/antigravity-clash`. You can also run `bin/antigravity-clash` directly from a terminal.
 
-启动器会检查 Clash 端口及 Antigravity 主进程。已有实例若没有预期的代理变量，会提示完全退出后重试；新实例启动后会核对代理变量。连续点击图标时使用文件锁避免重复启动。
+The launcher checks the Clash port and the Antigravity main process. If an existing instance lacks the expected proxy environment, it asks you to quit Antigravity completely and try again. After starting a new instance, it verifies the proxy environment. A file lock prevents repeated clicks from starting multiple instances.
 
-## 直连域名
+## Direct connections
 
-默认直连 `localhost`、`127.0.0.1` 和 `::1`。如需添加域名，在 `~/.config/antigravity-clash/no-proxy` 写入一行逗号分隔的域名，例如：
+`localhost`, `127.0.0.1`, and `::1` bypass the proxy by default. To add domains, put a single comma-separated line in `~/.config/antigravity-clash/no-proxy`, for example:
 
 ```text
 .example.com,.internal.example
 ```
 
-该文件只保存在本机，不会打包进应用。代理变量也会被 Antigravity 启动的子进程继承，包括内置终端和扩展。Clash 的规则决定请求最终是代理还是直连。
+This file stays on your machine and is not bundled with the app. Processes launched by Antigravity, including its integrated terminal and extensions, inherit the proxy environment. Clash rules determine whether each request ultimately uses a proxy or a direct connection.
 
-## 源码
+## Source files
 
-| 路径 | 用途 |
+| Path | Purpose |
 | --- | --- |
-| `bin/antigravity-clash` | 启动与检查逻辑 |
-| `app/Contents/MacOS/Antigravity-Clash` | Dock 入口和错误对话框 |
-| `app/Contents/Info.plist` | macOS 应用元数据 |
-| `app/Contents/Resources/AppIcon.icns` | 应用图标 |
-| `install.sh` | 安装命令行入口并组装、签名应用包 |
+| `bin/antigravity-clash` | Launch and process checks |
+| `app/Contents/MacOS/Antigravity-Clash` | Dock entry point and error dialog |
+| `app/Contents/Info.plist` | macOS app metadata |
+| `app/Contents/Resources/AppIcon.icns` | App icon |
+| `install.sh` | Install the command-line launcher, assemble the app, and sign it |
 
-应用包使用本机临时签名，签名产物不纳入仓库。项目采用 [MIT License](LICENSE)。
+The installer creates a local ad hoc signature; signature files are not committed. This project is licensed under the [MIT License](LICENSE).
