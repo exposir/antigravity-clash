@@ -12,8 +12,17 @@ if [[ -r "$NO_PROXY_FILE" ]]; then
   [[ -z "$extra_no_proxy" ]] || NO_PROXY_LIST="$NO_PROXY_LIST,$extra_no_proxy"
 fi
 
+# Shell startup reads this before the language server is spawned. Keep the
+# proxy configured even when Clash is temporarily stopped.
+if [[ "${1:-}" == --shell-env ]]; then
+  print -r -- "export HTTP_PROXY=${(q)PROXY} HTTPS_PROXY=${(q)PROXY} ALL_PROXY=${(q)SOCKS_PROXY}"
+  print -r -- "export http_proxy=${(q)PROXY} https_proxy=${(q)PROXY} all_proxy=${(q)SOCKS_PROXY}"
+  print -r -- "export NO_PROXY=${(q)NO_PROXY_LIST} no_proxy=${(q)NO_PROXY_LIST}"
+  exit 0
+fi
+
 # Keep the check and launch together when the Dock icon is clicked repeatedly.
-if [[ "${1:-}" != --locked ]]; then
+if [[ "${1:-}" != --locked && "${1:-}" != --status ]]; then
   exec /usr/bin/lockf -k -t 15 "$HOME/Library/Caches/antigravity-clash.lock" /bin/zsh "$0" --locked
 fi
 
@@ -35,6 +44,74 @@ has_proxy_env() {
   done
 }
 
+find_servers() {
+  local rc
+  pgrep -P "$1" -f "^${APP//./[.]}/Contents/Resources/bin/language_server([[:space:]]|$)"
+  rc=$?
+  (( rc <= 1 ))
+}
+
+has_instance_proxy() {
+  local server_pids server_pid
+  server_pids=$(find_servers "$1") || return 1
+  if [[ -z "$server_pids" ]]; then
+    has_proxy_env "$1"
+    return $?
+  fi
+  for server_pid in ${(f)server_pids}; do
+    has_proxy_env "$server_pid" || return 1
+  done
+}
+
+all_instances_have_proxy() {
+  local main_pid
+  for main_pid in ${(f)main_pids}; do
+    has_instance_proxy "$main_pid" || return 1
+  done
+}
+
+if [[ "${1:-}" == --status ]]; then
+  result=0
+  if nc -z -w1 127.0.0.1 7897 2>/dev/null; then
+    echo "Clash: 127.0.0.1:7897 可连接"
+  else
+    echo "Clash: 127.0.0.1:7897 未监听"
+    result=1
+  fi
+  main_pids=$(find_main) || exit 1
+  if [[ -z "$main_pids" ]]; then
+    echo "Antigravity: 未运行"
+    exit 1
+  fi
+  for pid in ${(f)main_pids}; do
+    if has_instance_proxy "$pid"; then
+      echo "Antigravity (pid $pid): 主进程或后台服务已配置代理"
+    else
+      echo "Antigravity (pid $pid): 未发现预期代理，完全退出后重试"
+      result=1
+    fi
+    server_pids=$(find_servers "$pid") || exit 1
+    if [[ -z "$server_pids" ]]; then
+      echo "后台服务: 尚未启动"
+      result=1
+    fi
+    for server_pid in ${(f)server_pids}; do
+      if has_proxy_env "$server_pid"; then
+        echo "后台服务 (pid $server_pid): 代理环境正确"
+      else
+        echo "后台服务 (pid $server_pid): 未带预期代理"
+        result=1
+      fi
+      if lsof -nP -a -p "$server_pid" -iTCP@127.0.0.1:7897 -sTCP:ESTABLISHED -t >/dev/null 2>&1; then
+        echo "后台服务 (pid $server_pid): 已建立到 Clash 的连接"
+      else
+        echo "后台服务 (pid $server_pid): 当前没有到 Clash 的连接（空闲时可能正常）"
+      fi
+    done
+  done
+  exit $result
+fi
+
 if ! nc -z -w1 127.0.0.1 7897 2>/dev/null; then
   echo "错误: Clash 未监听 127.0.0.1:7897，先启动 Clash Verge" >&2
   exit 1
@@ -42,12 +119,17 @@ fi
 
 main_pids=$(find_main) || exit 1
 if [[ -n "$main_pids" ]]; then
-  for pid in ${(f)main_pids}; do
-    if ! has_proxy_env "$pid"; then
-      echo "错误: Antigravity 正在运行但未带预期代理 (pid $pid)，请 Cmd+Q 完全退出后重试" >&2
-      exit 1
-    fi
+  # A directly launched main process can appear before shell startup finishes.
+  for attempt in {1..20}; do
+    all_instances_have_proxy && break
+    sleep 0.5
+    main_pids=$(find_main) || exit 1
+    [[ -n "$main_pids" ]] || break
   done
+  if [[ -z "$main_pids" ]] || ! all_instances_have_proxy; then
+    echo "错误: Antigravity 未带预期代理，请 Cmd+Q 完全退出后重试" >&2
+    exit 1
+  fi
   open -a "$APP"
   rc=$?
   if (( rc != 0 )); then
@@ -77,17 +159,17 @@ fi
 for attempt in {1..20}; do
   main_pids=$(find_main) || exit 1
   if [[ -n "$main_pids" ]]; then
-    for pid in ${(f)main_pids}; do
-      if ! has_proxy_env "$pid"; then
-        echo "错误: Antigravity 已启动，但未带预期代理 (pid $pid)" >&2
-        exit 1
-      fi
-    done
-    echo "Antigravity 已在 Clash 代理下启动"
-    exit 0
+    if all_instances_have_proxy; then
+      echo "Antigravity 已在 Clash 代理下启动"
+      exit 0
+    fi
   fi
   sleep 0.5
 done
 
-echo "错误: 启动命令已执行，但 10 秒内未发现 Antigravity 主进程" >&2
+if [[ -n "$main_pids" ]]; then
+  echo "错误: Antigravity 已启动，但 10 秒内未确认预期代理" >&2
+else
+  echo "错误: 启动命令已执行，但 10 秒内未发现 Antigravity 主进程" >&2
+fi
 exit 1
